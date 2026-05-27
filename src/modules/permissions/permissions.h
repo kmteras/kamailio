@@ -30,6 +30,7 @@
 #include "../../core/sr_module.h"
 #include "../../lib/srdb1/db.h"
 #include "../../core/pvar.h"
+#include "../../core/locking.h"
 #include "rule.h"
 
 #define DEFAULT_ALLOW_FILE "permissions.allow"
@@ -73,6 +74,7 @@ extern int
 #define PERM_LOAD_DENYFILE (1 << 3)
 extern int _perm_load_backends; /* */
 extern time_t *perm_rpc_reload_time;
+extern gen_lock_t *perm_reload_lock;
 
 typedef struct int_or_pvar
 {

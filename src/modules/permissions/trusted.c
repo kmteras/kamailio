@@ -95,6 +95,7 @@ int reload_trusted_table(void)
 	}
 
 	/* Choose new hash table and free its old contents */
+	lock_get(perm_reload_lock);
 	if(*perm_trust_table == perm_trust_table_1) {
 		new_hash_table = perm_trust_table_2;
 	} else {
@@ -170,6 +171,7 @@ int reload_trusted_table(void)
 	perm_dbf.free_result(perm_db_handle, res);
 
 	*perm_trust_table = new_hash_table;
+	lock_release(perm_reload_lock);
 
 	LM_DBG("trusted table reloaded successfully.\n");
 
