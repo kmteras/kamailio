@@ -134,6 +134,7 @@ static ds_set_t **ds_lists = NULL;
 static int *ds_list_nr = NULL;
 static int *ds_crt_idx = NULL;
 static int *ds_next_idx = NULL;
+static gen_lock_t *ds_reload_lock = NULL;
 
 static ds_set_t *ds_strictest_node = NULL;
 static int ds_strictest_idx = 0;
@@ -314,6 +315,15 @@ int ds_init_data(void)
 	ds_next_idx = p + 1;
 	ds_list_nr = p + 2;
 	*ds_crt_idx = *ds_next_idx = 0;
+
+	ds_reload_lock = lock_alloc();
+	if(!ds_reload_lock) {
+		shm_free(p);
+		shm_free(ds_lists);
+		SHM_MEM_ERROR;
+		return -1;
+	}
+	lock_init(ds_reload_lock);
 
 	return 0;
 }
@@ -1016,19 +1026,23 @@ int ds_load_list(char *lfile)
 	str attrs;
 	ds_latency_stats_t *latency_stats;
 
+	lock_get(ds_reload_lock);
 	if((*ds_crt_idx) != (*ds_next_idx)) {
 		LM_WARN("load command already generated, aborting reload...\n");
+		lock_release(ds_reload_lock);
 		return 0;
 	}
 
 	if(lfile == NULL || strlen(lfile) <= 0) {
 		LM_ERR("bad list file\n");
+		lock_release(ds_reload_lock);
 		return -1;
 	}
 
 	f = fopen(lfile, "r");
 	if(f == NULL) {
 		LM_ERR("can't open list file [%s]\n", lfile);
+		lock_release(ds_reload_lock);
 		return -1;
 	}
 
@@ -1137,6 +1151,7 @@ int ds_load_list(char *lfile)
 	/* Update list - should it be sync'ed? */
 	_ds_list_nr = setn;
 	*ds_crt_idx = *ds_next_idx;
+	lock_release(ds_reload_lock);
 
 	LM_DBG("found [%d] dest sets\n", _ds_list_nr);
 
@@ -1148,6 +1163,7 @@ error:
 		fclose(f);
 	ds_avl_destroy(&ds_lists[*ds_next_idx]);
 	*ds_next_idx = *ds_crt_idx;
+	lock_release(ds_reload_lock);
 	return -1;
 }
 
@@ -1286,18 +1302,22 @@ int ds_load_db(void)
 		}
 	}
 
+	lock_get(ds_reload_lock);
 	if((*ds_crt_idx) != (*ds_next_idx)) {
 		LM_WARN("load command already generated, aborting reload...\n");
+		lock_release(ds_reload_lock);
 		return 0;
 	}
 
 	if(ds_db_handle == NULL) {
 		LM_ERR("invalid DB handler\n");
+		lock_release(ds_reload_lock);
 		return -1;
 	}
 
 	if(ds_dbf.use_table(ds_db_handle, &ds_table_name) < 0) {
 		LM_ERR("error in use_table\n");
+		lock_release(ds_reload_lock);
 		return -1;
 	}
 
@@ -1307,6 +1327,7 @@ int ds_load_db(void)
 	if(ds_dbf.query(ds_db_handle, 0, 0, 0, query_cols, 0, nrcols, 0, &res)
 			< 0) {
 		LM_ERR("error while querying database\n");
+		lock_release(ds_reload_lock);
 		return -1;
 	}
 
@@ -1395,6 +1416,7 @@ int ds_load_db(void)
 	/* update data - should it be sync'ed? */
 	_ds_list_nr = setn;
 	*ds_crt_idx = *ds_next_idx;
+	lock_release(ds_reload_lock);
 
 	LM_DBG("found [%d] dest sets\n", _ds_list_nr);
 
@@ -1408,6 +1430,7 @@ err2:
 	ds_avl_destroy(&ds_lists[*ds_next_idx]);
 	ds_dbf.free_result(ds_db_handle, res);
 	*ds_next_idx = *ds_crt_idx;
+	lock_release(ds_reload_lock);
 
 	return -1;
 }
@@ -1423,6 +1446,12 @@ int ds_destroy_list(void)
 
 	if(ds_crt_idx)
 		shm_free(ds_crt_idx);
+
+	if(ds_reload_lock) {
+		lock_destroy(ds_reload_lock);
+		lock_dealloc(ds_reload_lock);
+		ds_reload_lock = NULL;
+	}
 
 	return 0;
 }
@@ -2890,6 +2919,7 @@ int ds_add_dst(int group, str *address, int flags, int priority, str *attrs)
 
 	setn = _ds_list_nr;
 
+	lock_get(ds_reload_lock);
 	*ds_next_idx = (*ds_crt_idx + 1) % 2;
 	ds_avl_destroy(&ds_lists[*ds_next_idx]);
 
@@ -2914,6 +2944,7 @@ int ds_add_dst(int group, str *address, int flags, int priority, str *attrs)
 
 	_ds_list_nr = setn;
 	*ds_crt_idx = *ds_next_idx;
+	lock_release(ds_reload_lock);
 
 	ds_log_sets();
 	return 0;
@@ -2921,6 +2952,7 @@ int ds_add_dst(int group, str *address, int flags, int priority, str *attrs)
 error:
 	ds_avl_destroy(&ds_lists[*ds_next_idx]);
 	*ds_next_idx = *ds_crt_idx;
+	lock_release(ds_reload_lock);
 	return -1;
 }
 
@@ -2972,6 +3004,7 @@ int ds_remove_dst(int group, str *address)
 	filter_arg.dest = dp;
 	filter_arg.setn = &setn;
 
+	lock_get(ds_reload_lock);
 	*ds_next_idx = (*ds_crt_idx + 1) % 2;
 	ds_avl_destroy(&ds_lists[*ds_next_idx]);
 
@@ -2985,6 +3018,7 @@ int ds_remove_dst(int group, str *address)
 
 	_ds_list_nr = setn;
 	*ds_crt_idx = *ds_next_idx;
+	lock_release(ds_reload_lock);
 
 	ds_log_sets();
 	return 0;
@@ -2992,6 +3026,7 @@ int ds_remove_dst(int group, str *address)
 error:
 	ds_avl_destroy(&ds_lists[*ds_next_idx]);
 	*ds_next_idx = *ds_crt_idx;
+	lock_release(ds_reload_lock);
 	return -1;
 }
 
