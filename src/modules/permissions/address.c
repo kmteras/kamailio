@@ -466,6 +466,7 @@ int reload_address_table(void)
 	address_tables_group_t atg;
 
 	/* Choose new hash table and free its old contents */
+	lock_get(perm_reload_lock);
 	if(*perm_addr_table == perm_addr_table_1) {
 		empty_addr_hash_table(perm_addr_table_2);
 		atg.address_table = perm_addr_table_2;
@@ -498,12 +499,14 @@ int reload_address_table(void)
 		ret = reload_address_file_table(&atg);
 	}
 	if(ret != 1) {
+		lock_release(perm_reload_lock);
 		return ret;
 	}
 
 	*perm_addr_table = atg.address_table;
 	*perm_subnet_table = atg.subnet_table;
 	*perm_domain_table = atg.domain_table;
+	lock_release(perm_reload_lock);
 
 	LM_DBG("address table reloaded successfully.\n");
 

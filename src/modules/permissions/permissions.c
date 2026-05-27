@@ -95,6 +95,7 @@ str perm_address_file = STR_NULL; /* Full path to file with address records */
 static int perm_check_all_branches = 1;
 
 time_t *perm_rpc_reload_time = NULL;
+gen_lock_t *perm_reload_lock = NULL;
 int _perm_max_subnets = 512;
 
 int _perm_load_backends = 0xFFFF;
@@ -643,6 +644,15 @@ static int mod_init(void)
 	}
 	*perm_rpc_reload_time = 0;
 
+	perm_reload_lock = lock_alloc();
+	if(!perm_reload_lock) {
+		shm_free(perm_rpc_reload_time);
+		perm_rpc_reload_time = NULL;
+		SHM_MEM_ERROR;
+		return -1;
+	}
+	lock_init(perm_reload_lock);
+
 	if(perm_reload_delta < 0)
 		perm_reload_delta = 5;
 
@@ -737,6 +747,12 @@ static void mod_exit(void)
 	if(perm_rpc_reload_time != NULL) {
 		shm_free(perm_rpc_reload_time);
 		perm_rpc_reload_time = 0;
+	}
+
+	if(perm_reload_lock != NULL) {
+		lock_destroy(perm_reload_lock);
+		lock_dealloc(perm_reload_lock);
+		perm_reload_lock = NULL;
 	}
 
 	for(i = 0; i < perm_rules_num; i++) {
